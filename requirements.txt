@@ -1,0 +1,15 @@
+flask==3.0.3
+python-dotenv==1.0.1
+# Google Drive
+google-api-python-client==2.131.0
+google-auth==2.29.0
+google-auth-httplib2==0.2.0
+# Gemini AI
+google-generativeai==0.7.2
+# Resume parsing
+pdfplumber==0.11.0
+python-docx==1.1.2
+# MySQL
+mysql-connector-python==9.5.0
+google-auth-oauthlib==1.1.0
+
