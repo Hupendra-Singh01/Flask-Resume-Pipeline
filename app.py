@@ -272,25 +272,30 @@ Resume Text:
 """
 
 def parse_with_gemini(text: str) -> dict:
-    """Parses resume with Gemini API; auto-rotates keys on quota exhaustion."""
+    """
+    Parses resume with Gemini API using key rotation.
+    Switches to next key on quota/rate/exceeded errors.
+    """
     last_error = None
     for idx, key in enumerate(GEMINI_API_KEYS):
         try:
+            _log(f"Trying Gemini key {idx+1}", "info")
             genai.configure(api_key=key)
-            model  = genai.GenerativeModel(GEMINI_MODEL)
-            raw    = model.generate_content(PROMPT.format(text=text)).text
-            clean  = raw.replace("```json", "").replace("```", "").strip()
+            model = genai.GenerativeModel(GEMINI_MODEL)
+            raw = model.generate_content(PROMPT.format(text=text)).text
+            clean = raw.replace("```json", "").replace("```", "").strip()
             return json.loads(clean)
         except json.JSONDecodeError as e:
             _log(f"Gemini JSON error (key {idx+1}): {e}", "error")
             return {}
         except Exception as e:
-            if any(kw in str(e).lower() for kw in ("quota", "rate", "exceeded")):
-                _log(f"Gemini key {idx+1} quota exhausted, rotating...", "warning")
+            error_msg = str(e).lower()
+            if "quota" in error_msg or "rate" in error_msg or "exceeded" in error_msg:
+                _log(f"Gemini key {idx+1} exhausted, rotating...", "warning")
                 last_error = e
                 continue
             raise
-    raise RuntimeError(f"All Gemini keys exhausted: {last_error}")
+    raise RuntimeError(f"All Gemini API keys exhausted: {last_error}")
 
 # ── MySQL Database Operations ──────────────────────────────────────────────────
 
