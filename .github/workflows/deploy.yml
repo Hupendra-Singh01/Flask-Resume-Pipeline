@@ -1,0 +1,34 @@
+name: Deploy Flask Resume Pipeline
+
+on:
+  push:
+    branches:
+      - main  # Change this if your default branch is 'master'
+
+jobs:
+  deploy:
+    runs-on: self-hosted  # This targets the runner you set up on your VM
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python Environment
+        run: |
+          # Create venv if it doesn't exist (first time only)
+          python3 -m venv venv
+          # Activate and install dependencies
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          # Ensure gunicorn is present in the venv
+          pip install gunicorn
+
+      - name: Deploy with PM2
+        run: |
+          source venv/bin/activate
+          # Restart the process if it exists, otherwise start it new
+          pm2 restart "flask-resume-app" || pm2 start venv/bin/gunicorn --name "flask-resume-app" -- --bind 0.0.0.0:5000 app:app
+          
+      - name: Save PM2 State
+        run: pm2 save

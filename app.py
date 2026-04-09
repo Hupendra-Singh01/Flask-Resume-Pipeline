@@ -75,7 +75,7 @@ def _log(msg: str, level: str = "info"):
     """Thread-safe logging to logger and state (max 200 entries).""" 
     ts = datetime.now().strftime("%H:%M:%S")
     entry = f"[{ts}] {msg}"
-    getattr(log, level)(msg)
+    getattr(log, level)(msg) 
     with _state_lock:
         _state["log"].append(entry)
         if len(_state["log"]) > 200:
