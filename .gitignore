@@ -4,3 +4,4 @@ __pycache__/
 .env
 service_account.json
 processed_ids.txt
+files/
