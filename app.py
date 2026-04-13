@@ -303,7 +303,7 @@ PROMPT = """
     5. Skills (JSON array of strings)
     6. Current Company
     7. Job Title (Current or Last)
-    8. Education (Highest Degree)
+    8. Education (Highest Degree only - return a simple string like "B.Tech in Computer Science" or "MBA" or "12th CBSE". DO NOT return array or JSON.)
     9. Current Location
     10. Current Salary (If mentioned, else 0)
     11. Expected Salary (If mentioned, else 0)
