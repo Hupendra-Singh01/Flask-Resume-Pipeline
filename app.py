@@ -53,7 +53,7 @@ if not GDRIVE_FOLDER_ID:
 SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "service_account.json")
 GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip()]
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL_SECONDS", "5"))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL_SECONDS", "120"))
 PROCESSED_IDS_FILE = os.getenv("PROCESSED_IDS_FILE", "processed_ids.txt")
 
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "").rstrip("/")
@@ -294,21 +294,27 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
 # ── Gemini Parsing ─────────────────────────────────────────────────────────────
 
 PROMPT = """
-You are an expert Resume Parser. Extract the following details from the resume text and return strict JSON.
-Keys:
-name, phone, email, salary, expected_ctc, notice, total_experience_years,
-location, current_company_name, skills, previous_companies_name,
-education, job_title, company_names
-Resume Text:
-{text}
+ You are an expert Resume Parser. Extract the following details from the resume text below:
+    
+    1. Name
+    2. Email
+    3. Phone Number
+    4. Total Experience (a number)
+    5. Skills (JSON array of strings)
+    6. Current Company
+    7. Job Title (Current or Last)
+    8. Education (Highest Degree)
+    9. Current Location
+    10. Current Salary (If mentioned, else 0)
+    11. Expected Salary (If mentioned, else 0)
+    12. Notice Period (In days, if mentioned, else 0)
+
+    Return ONLY raw JSON. No markdown formatting.
+    Keys: name, email, phone, totalExperienceYears, skills, currentCompanyName, jobTitle, education, location, salary, expected_ctc, notice
+
+    Resume Text:
+    {text}
 """
-
-
-def extract_retry_seconds(msg: str, default=5):
-    m = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?)s", msg.lower())
-    if m:
-        return int(float(m.group(1))) + 2
-    return default
 
 
 def parse_with_gemini(text: str) -> dict:
@@ -319,25 +325,40 @@ def parse_with_gemini(text: str) -> dict:
     last_error = None
     for idx, key in enumerate(GEMINI_API_KEYS):
         try:
-            _log(f"Trying Gemini key {idx + 1}")
+            _log(f"Trying Gemini key {idx + 1}/{len(GEMINI_API_KEYS)}")
             genai.configure(api_key=key)
             model = genai.GenerativeModel(GEMINI_MODEL)
             raw = model.generate_content(PROMPT.format(text=text[:15000])).text
             clean = raw.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean)
+            result = json.loads(clean)
+            _log(f"Gemini key {idx + 1} succeeded")
+            return result
+
         except json.JSONDecodeError as e:
-            _log(f"Gemini JSON error (key {idx + 1}): {e}", "error")
+            _log(f"Gemini JSON parse error (key {idx + 1}): {e}", "error")
             return {}
+
         except Exception as e:
             msg = str(e).lower()
             if "quota" in msg or "rate" in msg or "exceeded" in msg or "429" in msg:
-                wait_s = 5
-                _log(f"Gemini key {idx + 1} quota hit, waiting {wait_s}s then rotating...", "warning")
+                wait_s = 60
+                _log(
+                    f"Gemini key {idx + 1} quota/rate limit hit — waiting {wait_s}s before trying next key...",
+                    "warning",
+                )
                 last_error = e
                 time.sleep(wait_s)
                 continue
+            # Non-quota error — don't rotate, just fail fast
+            _log(f"Gemini unexpected error (key {idx + 1}): {e}", "error")
             raise
-    raise RuntimeError(f"All Gemini API keys exhausted: {last_error}")
+
+    # All keys exhausted — skip this resume, retry next poll cycle
+    _log(
+        f"All {len(GEMINI_API_KEYS)} Gemini key(s) exhausted — skipping resume, will retry next poll cycle.",
+        "warning",
+    )
+    return {}
 
 
 # ── MySQL ──────────────────────────────────────────────────────────────────────
@@ -441,7 +462,8 @@ def run_pipeline():
 
                 parsed = parse_with_gemini(text)
                 if not parsed:
-                    _log(f"Gemini returned empty for {fname}", "warning")
+                    _log(f"Gemini returned empty for {fname} — will retry next cycle", "warning")
+                    # Do NOT save_processed_id here so it retries next poll
                     continue
 
                 email = to_text(parsed.get("email", "")) or ""
@@ -459,7 +481,7 @@ def run_pipeline():
                 found += 1
                 _log(f"Saved: {to_text(parsed.get('name', 'Unknown'))} | file={stored_name} | cv_url={cv_url}")
 
-                time.sleep(5)
+                time.sleep(15)
 
             except Exception as e:
                 _log(f"Error on {fname}: {e}", "error")
@@ -476,7 +498,7 @@ def run_pipeline():
     _log(f"=== Run complete — {found} new resume(s) saved ===")
 
 
-# ── Poller ────────��────────────────────────────────────────────────────────────
+# ── Poller ─────────────────────────────────────────────────────────────────────
 
 def polling_thread():
     _log(f"Background poller started (interval={POLL_INTERVAL}s)")
